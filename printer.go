@@ -105,6 +105,7 @@ const (
 //sys	StartDocPrinter(h syscall.Handle, level uint32, docinfo *DOC_INFO_1) (err error) = winspool.StartDocPrinterW
 //sys	EndDocPrinter(h syscall.Handle) (err error) = winspool.EndDocPrinter
 //sys	WritePrinter(h syscall.Handle, buf *byte, bufN uint32, written *uint32) (err error) = winspool.WritePrinter
+//sys	ReadPrinter(h syscall.Handle, buf *byte, bufN uint32, read *uint32) (err error) = winspool.ReadPrinter
 //sys	StartPagePrinter(h syscall.Handle) (err error) = winspool.StartPagePrinter
 //sys	EndPagePrinter(h syscall.Handle) (err error) = winspool.EndPagePrinter
 //sys	EnumPrinters(flags uint32, name *uint16, level uint32, buf *byte, bufN uint32, needed *uint32, returned *uint32) (err error) = winspool.EnumPrintersW
@@ -351,6 +352,15 @@ func (p *Printer) StartRawDocument(name string) error {
 		datatype = "XPS_PASS"
 	}
 	return p.StartDocument(name, datatype)
+}
+
+func (p *Printer) Read(b []byte) (int, error) {
+	var read uint32
+	err := ReadPrinter(p.h, &b[0], uint32(len(b)), &read)
+	if err != nil {
+		return 0, err
+	}
+	return int(read), nil
 }
 
 func (p *Printer) Write(b []byte) (int, error) {

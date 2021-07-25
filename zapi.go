@@ -16,6 +16,7 @@ var (
 	procStartDocPrinterW   = modwinspool.NewProc("StartDocPrinterW")
 	procEndDocPrinter      = modwinspool.NewProc("EndDocPrinter")
 	procWritePrinter       = modwinspool.NewProc("WritePrinter")
+	procReadPrinter        = modwinspool.NewProc("ReadPrinter")
 	procStartPagePrinter   = modwinspool.NewProc("StartPagePrinter")
 	procEndPagePrinter     = modwinspool.NewProc("EndPagePrinter")
 	procEnumPrintersW      = modwinspool.NewProc("EnumPrintersW")
@@ -85,6 +86,18 @@ func EndDocPrinter(h syscall.Handle) (err error) {
 
 func WritePrinter(h syscall.Handle, buf *byte, bufN uint32, written *uint32) (err error) {
 	r1, _, e1 := syscall.Syscall6(procWritePrinter.Addr(), 4, uintptr(h), uintptr(unsafe.Pointer(buf)), uintptr(bufN), uintptr(unsafe.Pointer(written)), 0, 0)
+	if r1 == 0 {
+		if e1 != 0 {
+			err = error(e1)
+		} else {
+			err = syscall.EINVAL
+		}
+	}
+	return
+}
+
+func ReadPrinter(h syscall.Handle, buf *byte, bufN uint32, read *uint32) (err error) {
+	r1, _, e1 := syscall.Syscall6(procReadPrinter.Addr(), 4, uintptr(h), uintptr(unsafe.Pointer(buf)), uintptr(bufN), uintptr(unsafe.Pointer(read)), 0, 0)
 	if r1 == 0 {
 		if e1 != 0 {
 			err = error(e1)

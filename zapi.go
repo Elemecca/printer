@@ -60,9 +60,10 @@ func OpenPrinter(name *uint16, h *syscall.Handle, defaults uintptr) (err error) 
 	return
 }
 
-func StartDocPrinter(h syscall.Handle, level uint32, docinfo *DOC_INFO_1) (err error) {
-	r1, _, e1 := syscall.Syscall(procStartDocPrinterW.Addr(), 3, uintptr(h), uintptr(level), uintptr(unsafe.Pointer(docinfo)))
-	if r1 == 0 {
+func StartDocPrinter(h syscall.Handle, level uint32, docinfo *DOC_INFO_1) (job uint32, err error) {
+	r0, _, e1 := syscall.Syscall(procStartDocPrinterW.Addr(), 3, uintptr(h), uintptr(level), uintptr(unsafe.Pointer(docinfo)))
+	job = uint32(r0)
+	if job == 0 {
 		if e1 != 0 {
 			err = error(e1)
 		} else {

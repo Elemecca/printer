@@ -6,6 +6,7 @@
 package printer
 
 import (
+	"fmt"
 	"strings"
 	"syscall"
 	"time"
@@ -102,7 +103,7 @@ const (
 //sys	GetDefaultPrinter(buf *uint16, bufN *uint32) (err error) = winspool.GetDefaultPrinterW
 //sys	ClosePrinter(h syscall.Handle) (err error) = winspool.ClosePrinter
 //sys	OpenPrinter(name *uint16, h *syscall.Handle, defaults uintptr) (err error) = winspool.OpenPrinterW
-//sys	StartDocPrinter(h syscall.Handle, level uint32, docinfo *DOC_INFO_1) (err error) = winspool.StartDocPrinterW
+//sys	StartDocPrinter(h syscall.Handle, level uint32, docinfo *DOC_INFO_1) (job uint32, err error) = winspool.StartDocPrinterW
 //sys	EndDocPrinter(h syscall.Handle) (err error) = winspool.EndDocPrinter
 //sys	WritePrinter(h syscall.Handle, buf *byte, bufN uint32, written *uint32) (err error) = winspool.WritePrinter
 //sys	ReadPrinter(h syscall.Handle, buf *byte, bufN uint32, read *uint32) (err error) = winspool.ReadPrinter
@@ -154,11 +155,13 @@ func ReadNames() ([]string, error) {
 }
 
 type Printer struct {
-	h syscall.Handle
+	h    syscall.Handle
+	name string
 }
 
 func Open(name string) (*Printer, error) {
 	var p Printer
+	p.name = name
 	// TODO: implement pDefault parameter
 	err := OpenPrinter(&(syscall.StringToUTF16(name))[0], &p.h, 0)
 	if err != nil {
@@ -335,23 +338,53 @@ func (p *Printer) StartDocument(name, datatype string) error {
 		OutputFile: nil,
 		Datatype:   &(syscall.StringToUTF16(datatype))[0],
 	}
-	return StartDocPrinter(p.h, 1, &d)
+	_, err := StartDocPrinter(p.h, 1, &d)
+	return err
+}
+
+func (p *Printer) OpenDocument(name, datatype string) (*Printer, error) {
+	d := DOC_INFO_1{
+		DocName:    &(syscall.StringToUTF16(name))[0],
+		OutputFile: nil,
+		Datatype:   &(syscall.StringToUTF16(datatype))[0],
+	}
+
+	job, err := StartDocPrinter(p.h, 1, &d)
+	if err != nil {
+		return nil, err
+	}
+
+	return Open(fmt.Sprintf("%s, Job %d", p.name, job))
+}
+
+// See https://support.microsoft.com/en-us/help/2779300/v4-print-drivers-using-raw-mode-to-send-pcl-postscript-directly-to-the
+func (p *Printer) rawType() (string, error) {
+	di, err := p.DriverInfo()
+	if err != nil {
+		return "", err
+	}
+	if di.Attributes&PRINTER_DRIVER_XPS != 0 {
+		return "XPS_PASS", nil
+	}
+	return "RAW", nil
 }
 
 // StartRawDocument calls StartDocument and passes either "RAW" or "XPS_PASS"
 // as a document type, depending if printer driver is XPS-based or not.
 func (p *Printer) StartRawDocument(name string) error {
-	di, err := p.DriverInfo()
+	datatype, err := p.rawType()
 	if err != nil {
 		return err
 	}
-	// See https://support.microsoft.com/en-us/help/2779300/v4-print-drivers-using-raw-mode-to-send-pcl-postscript-directly-to-the
-	// for details.
-	datatype := "RAW"
-	if di.Attributes&PRINTER_DRIVER_XPS != 0 {
-		datatype = "XPS_PASS"
-	}
 	return p.StartDocument(name, datatype)
+}
+
+func (p *Printer) OpenRawDocument(name string) (*Printer, error) {
+	datatype, err := p.rawType()
+	if err != nil {
+		return nil, err
+	}
+	return p.OpenDocument(name, datatype)
 }
 
 func (p *Printer) Read(b []byte) (int, error) {

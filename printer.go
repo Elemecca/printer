@@ -6,6 +6,7 @@
 package printer
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"syscall"
@@ -155,8 +156,10 @@ func ReadNames() ([]string, error) {
 }
 
 type Printer struct {
-	h    syscall.Handle
-	name string
+	h         syscall.Handle
+	name      string
+	jobId     uint32
+	jobHandle syscall.Handle
 }
 
 func Open(name string) (*Printer, error) {
@@ -338,61 +341,52 @@ func (p *Printer) StartDocument(name, datatype string) error {
 		OutputFile: nil,
 		Datatype:   &(syscall.StringToUTF16(datatype))[0],
 	}
-	_, err := StartDocPrinter(p.h, 1, &d)
+	id, err := StartDocPrinter(p.h, 1, &d)
+	p.jobId = id
 	return err
-}
-
-func (p *Printer) OpenDocument(name, datatype string) (*Printer, error) {
-	d := DOC_INFO_1{
-		DocName:    &(syscall.StringToUTF16(name))[0],
-		OutputFile: nil,
-		Datatype:   &(syscall.StringToUTF16(datatype))[0],
-	}
-
-	job, err := StartDocPrinter(p.h, 1, &d)
-	if err != nil {
-		return nil, err
-	}
-
-	return Open(fmt.Sprintf("%s, Job %d", p.name, job))
-}
-
-// See https://support.microsoft.com/en-us/help/2779300/v4-print-drivers-using-raw-mode-to-send-pcl-postscript-directly-to-the
-func (p *Printer) rawType() (string, error) {
-	di, err := p.DriverInfo()
-	if err != nil {
-		return "", err
-	}
-	if di.Attributes&PRINTER_DRIVER_XPS != 0 {
-		return "XPS_PASS", nil
-	}
-	return "RAW", nil
 }
 
 // StartRawDocument calls StartDocument and passes either "RAW" or "XPS_PASS"
 // as a document type, depending if printer driver is XPS-based or not.
 func (p *Printer) StartRawDocument(name string) error {
-	datatype, err := p.rawType()
+	di, err := p.DriverInfo()
 	if err != nil {
 		return err
+	}
+	// See https://support.microsoft.com/en-us/help/2779300/v4-print-drivers-using-raw-mode-to-send-pcl-postscript-directly-to-the
+	// for details.
+	datatype := "RAW"
+	if di.Attributes&PRINTER_DRIVER_XPS != 0 {
+		datatype = "XPS_PASS"
 	}
 	return p.StartDocument(name, datatype)
 }
 
-func (p *Printer) OpenRawDocument(name string) (*Printer, error) {
-	datatype, err := p.rawType()
-	if err != nil {
-		return nil, err
+func (p *Printer) openJob() error {
+	if p.jobHandle != 0 {
+		return nil
 	}
-	return p.OpenDocument(name, datatype)
+
+	if p.jobId == 0 {
+		return errors.New("no current job: call StartDocument first")
+	}
+
+	jobName := fmt.Sprintf("%s, Job %d", p.name, p.jobId)
+	return OpenPrinter(&(syscall.StringToUTF16(jobName))[0], &p.jobHandle, 0)
 }
 
 func (p *Printer) Read(b []byte) (int, error) {
-	var read uint32
-	err := ReadPrinter(p.h, &b[0], uint32(len(b)), &read)
+	err := p.openJob()
 	if err != nil {
 		return 0, err
 	}
+
+	var read uint32
+	err = ReadPrinter(p.h, &b[0], uint32(len(b)), &read)
+	if err != nil {
+		return 0, err
+	}
+
 	return int(read), nil
 }
 
@@ -406,6 +400,16 @@ func (p *Printer) Write(b []byte) (int, error) {
 }
 
 func (p *Printer) EndDocument() error {
+	if p.jobHandle != 0 {
+		err := ClosePrinter(p.jobHandle)
+		if err != nil {
+			return err
+		}
+	}
+
+	p.jobId = 0
+	p.jobHandle = 0
+
 	return EndDocPrinter(p.h)
 }
 
